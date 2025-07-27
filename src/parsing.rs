@@ -4,9 +4,9 @@ use std::iter::FromIterator;
 pub type CharSet = HashSet<char>;
 pub type Occurrences = HashMap<char, Vec<Occurrence>>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct Occurrence {
-    pub target_idx: usize,
+    pub target_idx: u32,
     pub is_start: bool,
     pub char: char,
 }
@@ -22,17 +22,22 @@ impl PartialEq for Occurrence {
 }
 
 pub fn build_occurrences(query: &QueryChars, string: &str, case_insensitive: bool) -> Occurrences {
+    assert!(string.len() <= u32::MAX as usize);
+
     let query_chars = condense(query, case_insensitive);
 
     let mut occurrences = HashMap::new();
-
-    let lower = string.to_lowercase();
 
     let mut prev_is_upper = false;
     let mut prev_is_sep = true;
     let mut prev_is_start = false;
 
-    for (i, (lower_c, original_c)) in lower.chars().zip(string.chars()).enumerate() {
+    for (i, (lower_c, original_c)) in string
+        .chars()
+        .flat_map(|c| c.to_lowercase())
+        .zip(string.chars())
+        .enumerate()
+    {
         let mut is_start = false;
         let is_sep = is_word_sep(original_c);
         let is_upper = original_c.is_uppercase();
@@ -54,7 +59,7 @@ pub fn build_occurrences(query: &QueryChars, string: &str, case_insensitive: boo
                     .or_insert(Vec::new())
                     .push(Occurrence {
                         char: original_c,
-                        target_idx: i,
+                        target_idx: i as u32,
                         is_start,
                     });
             }
@@ -76,7 +81,7 @@ pub fn build_occurrences(query: &QueryChars, string: &str, case_insensitive: boo
                 .or_insert(Vec::new())
                 .push(Occurrence {
                     char: original_c,
-                    target_idx: i,
+                    target_idx: i as u32,
                     is_start,
                 });
         }
@@ -140,7 +145,7 @@ mod tests {
     use std::collections::HashSet;
     use std::iter::FromIterator;
 
-    use super::{build_occurrences, condense, is_word_sep, process_query, Occurrence, QueryChar};
+    use super::{Occurrence, QueryChar, build_occurrences, condense, is_word_sep, process_query};
 
     #[test]
     fn word_seps() {

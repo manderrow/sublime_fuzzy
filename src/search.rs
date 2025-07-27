@@ -1,13 +1,12 @@
 use std::collections::HashMap;
 
-use matching::Match;
-use parsing::Occurrences;
-use scoring::Scoring;
+use roaring::RoaringBitmap;
 
-use crate::{
-    parsing::{build_occurrences, process_query, Occurrence, QueryChar, QueryChars},
-    scoring::DEFAULT_SCORING,
+use crate::matching::Match;
+use crate::parsing::{
+    Occurrence, Occurrences, QueryChar, QueryChars, build_occurrences, process_query,
 };
+use crate::scoring::{DEFAULT_SCORING, Scoring};
 
 /// Describes a fuzzy search. Alternative to [`best_match`](crate::best_match) which allows for more configuration.
 ///
@@ -103,7 +102,7 @@ impl<'a> FuzzySearch<'a> {
 struct FuzzySearcher<'a> {
     query: QueryChars,
     scoring: &'a Scoring,
-    match_cache: HashMap<(usize, usize, usize), Option<Match>>,
+    match_cache: HashMap<(u32, u32, u32), Option<Match>>,
     case_insensitive: bool,
 }
 
@@ -127,10 +126,10 @@ impl<'a> FuzzySearcher<'a> {
     }
 
     #[inline(always)]
-    fn case_bonus(&self, query_idx: usize, occurrence: &Occurrence) -> isize {
+    fn case_bonus(&self, query_idx: u32, occurrence: &Occurrence) -> isize {
         if self.case_insensitive {
             self.query
-                .get(query_idx)
+                .get(query_idx as usize)
                 .map_or(0, |c| (c.original == occurrence.char) as isize)
                 * self.scoring.bonus_match_case
         } else {
@@ -150,9 +149,9 @@ impl<'a> FuzzySearcher<'a> {
 
     fn match_(
         &mut self,
-        query_idx: usize,
+        query_idx: u32,
         occurrence: &Occurrence,
-        consecutive: usize,
+        consecutive: u32,
         occurrences: &Occurrences,
     ) -> Option<Match> {
         let this_key = (query_idx, occurrence.target_idx, consecutive);
@@ -162,7 +161,7 @@ impl<'a> FuzzySearcher<'a> {
             return cached.clone();
         }
 
-        let next_char = self.query.get(query_idx);
+        let next_char = self.query.get(query_idx as usize);
 
         let score = consecutive as isize * self.scoring.bonus_consecutive
             + occurrence.is_start as isize * self.scoring.bonus_word_start

@@ -72,11 +72,6 @@
 //! **Note:** Any whitespace in the pattern (`'something'`
 //! in the examples above) will be removed.
 //!
-#[cfg(feature = "serde_support")]
-extern crate serde;
-#[cfg(feature = "serde_support")]
-#[macro_use]
-extern crate serde_derive;
 
 mod matching;
 mod parsing;
@@ -140,22 +135,28 @@ pub fn format_simple(match_: &Match, target: &str, before: &str, after: &str) ->
 
     let mut pieces = Vec::new();
 
-    let mut last_end = 0;
+    let mut last_end: u32 = 0;
 
     for c in match_.continuous_matches() {
         // Piece between last match and this match
         pieces.push(
             target
                 .chars()
-                .skip(last_end)
-                .take(c.start() - last_end)
+                .skip(last_end as usize)
+                .take((c.start() - last_end) as usize)
                 .collect::<String>(),
         );
 
         pieces.push(str_before.clone());
 
         // This match
-        pieces.push(target.chars().skip(c.start()).take(c.len()).collect());
+        pieces.push(
+            target
+                .chars()
+                .skip(c.start() as usize)
+                .take(c.len() as usize)
+                .collect(),
+        );
 
         pieces.push(str_after.clone());
 
@@ -163,8 +164,8 @@ pub fn format_simple(match_: &Match, target: &str, before: &str, after: &str) ->
     }
 
     // Leftover chars
-    if last_end != target.len() {
-        pieces.push(target.chars().skip(last_end).collect::<String>());
+    if last_end as usize != target.len() {
+        pieces.push(target.chars().skip(last_end as usize).collect::<String>());
     }
 
     pieces.join("")
@@ -176,7 +177,7 @@ mod tests {
 
     #[test]
     fn feature_serde() {
-        assert!(cfg!(feature = "serde_support"));
+        assert!(cfg!(feature = "serde"));
     }
 
     #[test]
@@ -285,10 +286,7 @@ mod tests {
     fn matches_unicode() {
         let m = best_match("👀", "🦀 👈 👀").unwrap();
 
-        assert_eq!(
-            m.matched_indices().cloned().collect::<Vec<usize>>(),
-            vec![4]
-        );
+        assert_eq!(m.matched_indices().copied().collect::<Vec<_>>(), vec![4]);
     }
 
     #[test]

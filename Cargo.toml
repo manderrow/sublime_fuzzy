@@ -8,6 +8,7 @@ readme = "README.md"
 keywords = ["fuzzy", "match", "search", "text"]
 categories = ["text-processing", "algorithms"]
 license-file = "LICENSE"
+edition = "2024"
 
 [lib]
 path = "src/lib.rs"
@@ -17,8 +18,8 @@ name = "sfz"
 path = "src/main.rs"
 
 [dependencies]
-serde_derive = { version = "1.0.67", optional = true }
-serde = { version = "1.0.67", optional = true }
+bumpalo = { version = "3.19.0", features = ["collections"] }
+serde = { version = "1", features = ["derive"], optional = true }
 
 [features]
-serde_support = ["serde", "serde_derive"]
+serde = ["dep:serde"]

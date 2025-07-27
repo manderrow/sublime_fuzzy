@@ -1,25 +1,27 @@
-use std::{cmp::Ordering, slice::Iter};
+use std::cmp::Ordering;
 
 use crate::Scoring;
+
+type Uint = u32;
 
 /// A (possible partial) match of query within the target string. Matched chars
 /// are stored as indices into the target string.
 ///
 /// The score is not clamped to any range and can be negative.
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "serde_support", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Match {
     /// Accumulative score
     score: isize,
     /// Count of current consecutive matched chars
-    consecutive: usize,
+    consecutive: Uint,
     /// Matched char indices
-    matched: Vec<usize>,
+    matched: Vec<u32>,
 }
 
 impl Match {
     /// Creates a new match with the given scoring and matched indices.
-    pub(crate) fn with_matched(score: isize, consecutive: usize, matched: Vec<usize>) -> Self {
+    pub(crate) fn with_matched(score: isize, consecutive: Uint, matched: Vec<u32>) -> Self {
         Match {
             score,
             consecutive,
@@ -33,7 +35,7 @@ impl Match {
     }
 
     /// Returns an iterator over the matched char indices.
-    pub fn matched_indices(&self) -> Iter<usize> {
+    pub fn matched_indices(&self) -> std::slice::Iter<u32> {
         self.matched.iter()
     }
 
@@ -67,7 +69,7 @@ impl Match {
             }
         }
 
-        self.matched.extend(&other.matched);
+        self.matched.extend_from_slice(&other.matched);
     }
 }
 
@@ -94,22 +96,22 @@ impl PartialEq for Match {
 /// Describes a continuous group of char indices
 #[derive(Debug)]
 pub struct ContinuousMatch {
-    start: usize,
-    len: usize,
+    start: Uint,
+    len: Uint,
 }
 
 impl ContinuousMatch {
-    pub(crate) fn new(start: usize, len: usize) -> Self {
+    pub(crate) fn new(start: Uint, len: Uint) -> Self {
         ContinuousMatch { start, len }
     }
 
     /// Returns the start index of this group.
-    pub fn start(&self) -> usize {
+    pub fn start(&self) -> Uint {
         self.start
     }
 
     /// Returns the length of this group.
-    pub fn len(&self) -> usize {
+    pub fn len(&self) -> Uint {
         self.len
     }
 }
@@ -124,7 +126,7 @@ impl PartialEq for ContinuousMatch {
 
 /// Iterator returning [`ContinuousMatch`]es from the matched char indices in a [`Match`]
 pub struct ContinuousMatches<'a> {
-    matched: &'a Vec<usize>,
+    matched: &'a [u32],
     current: usize,
 }
 
@@ -137,11 +139,11 @@ impl<'a> Iterator for ContinuousMatches<'_> {
 
         let mut last_idx = None;
 
-        for idx in self.matched.iter().cloned().skip(self.current) {
+        for idx in self.matched.iter().skip(self.current) {
             start = start.or(Some(idx));
 
             if last_idx.is_some() && (idx - last_idx.unwrap() != 1) {
-                return Some(ContinuousMatch::new(start.unwrap(), len));
+                return Some(ContinuousMatch::new(*start.unwrap(), len));
             }
 
             self.current += 1;
@@ -150,7 +152,7 @@ impl<'a> Iterator for ContinuousMatches<'_> {
         }
 
         if last_idx.is_some() {
-            return Some(ContinuousMatch::new(start.unwrap(), len));
+            return Some(ContinuousMatch::new(*start.unwrap(), len));
         }
 
         None
@@ -165,7 +167,7 @@ mod tests {
 
     #[test]
     fn continuous() {
-        let m = Match::with_matched(0, 0, vec![0, 1, 2, 5, 6, 10]);
+        let m = Match::with_matched(0, 0, vec![0, 1, 2, 5, 6, 10].into_iter().collect());
 
         assert_eq!(
             m.continuous_matches().collect::<Vec<ContinuousMatch>>(),
@@ -179,8 +181,8 @@ mod tests {
 
     #[test]
     fn extend_match() {
-        let mut a = Match::with_matched(16, 3, vec![1, 2, 3]);
-        let b = Match::with_matched(8, 3, vec![5, 6, 7]);
+        let mut a = Match::with_matched(16, 3, vec![1, 2, 3].into_iter().collect());
+        let b = Match::with_matched(8, 3, vec![5, 6, 7].into_iter().collect());
 
         let s = Scoring::default();
 
@@ -193,8 +195,8 @@ mod tests {
 
     #[test]
     fn extend_match_cont() {
-        let mut a = Match::with_matched(16, 3, vec![1, 2, 3]);
-        let b = Match::with_matched(8, 3, vec![4, 5, 6]);
+        let mut a = Match::with_matched(16, 3, vec![1, 2, 3].into_iter().collect());
+        let b = Match::with_matched(8, 3, vec![4, 5, 6].into_iter().collect());
 
         let s = Scoring::default();
 
