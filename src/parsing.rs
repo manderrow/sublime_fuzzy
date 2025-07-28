@@ -10,8 +10,8 @@ pub type Occurrences<'bump> =
 
 #[derive(Debug, Clone)]
 pub struct Query<'bump> {
-    pub(crate) query: &'bump [char],
-    pub(crate) chars: CharSet<'bump>,
+    pub query: &'bump [char],
+    pub chars: CharSet<'bump>,
 }
 
 impl<'bump> Query<'bump> {
