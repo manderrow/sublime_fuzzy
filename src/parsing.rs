@@ -1,23 +1,33 @@
 use std::collections::{HashMap, HashSet};
-use std::iter::FromIterator;
 
 pub type CharSet = HashSet<char>;
 pub type Occurrences = HashMap<char, Vec<Occurrence>>;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(align(8))]
 pub struct Occurrence {
     pub target_idx: u32,
-    pub is_start: bool,
-    pub char: char,
+    data: u32,
 }
 
-impl Eq for Occurrence {}
+impl Occurrence {
+    #[inline]
+    pub fn new(target_idx: u32, is_start: bool, char: char) -> Self {
+        assert_eq!(char as u32 & (1 << 31), 0);
+        Self {
+            target_idx,
+            data: ((is_start as u32) << 31) | char as u32,
+        }
+    }
 
-impl PartialEq for Occurrence {
-    fn eq(&self, other: &Occurrence) -> bool {
-        self.target_idx == other.target_idx
-            && self.char == other.char
-            && self.is_start == other.is_start
+    #[inline]
+    pub fn is_start(self) -> bool {
+        (self.data >> 31) != 0
+    }
+
+    #[inline]
+    pub fn char(self) -> char {
+        unsafe { char::from_u32_unchecked(self.data & !(1 << 31)) }
     }
 }
 
@@ -54,11 +64,7 @@ pub fn build_occurrences(query: &QueryChars, string: &str, case_insensitive: boo
                 occurrences
                     .entry(key_char)
                     .or_insert(Vec::new())
-                    .push(Occurrence {
-                        char: original_c,
-                        target_idx: i as u32,
-                        is_start,
-                    });
+                    .push(Occurrence::new(i as u32, is_start, original_c));
             }
 
             continue;
@@ -76,11 +82,7 @@ pub fn build_occurrences(query: &QueryChars, string: &str, case_insensitive: boo
             occurrences
                 .entry(key_char)
                 .or_insert(Vec::new())
-                .push(Occurrence {
-                    char: original_c,
-                    target_idx: i as u32,
-                    is_start,
-                });
+                .push(Occurrence::new(i as u32, is_start, original_c));
         }
 
         prev_is_start = is_start;
@@ -140,6 +142,19 @@ mod tests {
     use std::iter::FromIterator;
 
     use super::{Occurrence, QueryChar, build_occurrences, condense, is_word_sep, process_query};
+
+    #[test]
+    fn occurrence_repr() {
+        for c in char::MIN..=char::MAX {
+            let o = Occurrence::new(0, false, c);
+            assert!(!o.is_start());
+            assert_eq!(o.char(), c);
+
+            let o = Occurrence::new(0, true, c);
+            assert!(o.is_start());
+            assert_eq!(o.char(), c);
+        }
+    }
 
     #[test]
     fn word_seps() {
@@ -205,52 +220,6 @@ mod tests {
     }
 
     #[test]
-    fn occurrence_eq() {
-        let a = Occurrence {
-            char: 'c',
-            target_idx: 0,
-            is_start: true,
-        };
-
-        assert_eq!(
-            a,
-            Occurrence {
-                char: 'c',
-                target_idx: 0,
-                is_start: true
-            }
-        );
-        assert_ne!(
-            a,
-            Occurrence {
-                char: 'c',
-                target_idx: 0,
-                is_start: false
-            },
-            "is_start differs but eq"
-        );
-        assert_ne!(
-            a,
-            Occurrence {
-                char: 'c',
-                target_idx: 1,
-                is_start: true
-            },
-            "target_idx differs but eq"
-        );
-
-        assert_ne!(
-            a,
-            Occurrence {
-                char: 'b',
-                target_idx: 0,
-                is_start: true
-            },
-            "char differs but eq"
-        );
-    }
-
-    #[test]
     fn occurrences() {
         let t = "SoccerCartoonController";
 
@@ -260,40 +229,17 @@ mod tests {
 
         let s = occs.remove(&'s').expect("Missing s occurrences");
 
-        assert_eq!(
-            s,
-            vec![Occurrence {
-                char: 'S',
-                target_idx: 0,
-                is_start: true,
-            }]
-        );
+        assert_eq!(s, vec![Occurrence::new(0, true, 'S')]);
 
         let c = occs.remove(&'c').expect("Missing c occurrences");
 
         assert_eq!(
             c,
             vec![
-                Occurrence {
-                    char: 'c',
-                    target_idx: 2,
-                    is_start: false,
-                },
-                Occurrence {
-                    char: 'c',
-                    target_idx: 3,
-                    is_start: false,
-                },
-                Occurrence {
-                    char: 'C',
-                    target_idx: 6,
-                    is_start: true,
-                },
-                Occurrence {
-                    char: 'C',
-                    target_idx: 13,
-                    is_start: true,
-                },
+                Occurrence::new(2, false, 'c'),
+                Occurrence::new(3, false, 'c'),
+                Occurrence::new(6, true, 'C'),
+                Occurrence::new(13, true, 'C'),
             ]
         );
     }
@@ -311,16 +257,8 @@ mod tests {
         assert_eq!(
             s,
             vec![
-                Occurrence {
-                    char: 'S',
-                    target_idx: 0,
-                    is_start: true,
-                },
-                Occurrence {
-                    char: 's',
-                    target_idx: 3,
-                    is_start: false,
-                }
+                Occurrence::new(0, true, 'S'),
+                Occurrence::new(3, false, 's')
             ]
         );
 
@@ -329,26 +267,10 @@ mod tests {
         assert_eq!(
             c,
             vec![
-                Occurrence {
-                    char: 'c',
-                    target_idx: 1,
-                    is_start: false,
-                },
-                Occurrence {
-                    char: 'c',
-                    target_idx: 2,
-                    is_start: false,
-                },
-                Occurrence {
-                    char: 'C',
-                    target_idx: 4,
-                    is_start: true,
-                },
-                Occurrence {
-                    char: 'C',
-                    target_idx: 8,
-                    is_start: true,
-                },
+                Occurrence::new(1, false, 'c'),
+                Occurrence::new(2, false, 'c'),
+                Occurrence::new(4, true, 'C'),
+                Occurrence::new(8, true, 'C'),
             ]
         );
     }

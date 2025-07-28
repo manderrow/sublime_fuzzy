@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use bumpalo::{Bump, vec};
 use hashbrown::HashMap;
 
@@ -150,7 +148,7 @@ impl<'a, 'bump> FuzzySearcher<'a, 'bump> {
         if self.case_insensitive {
             self.query
                 .get(query_idx as usize)
-                .map_or(0, |c| (c.original == occurrence.char) as isize)
+                .map_or(0, |c| (c.original == occurrence.char()) as isize)
                 * self.scoring.bonus_match_case
         } else {
             0
@@ -240,7 +238,7 @@ impl<'a, 'bump> FuzzySearcher<'a, 'bump> {
 
     fn match_calc_score(&self, query_idx: u32, occurrence: &Occurrence, consecutive: u32) -> isize {
         consecutive as isize * self.scoring.bonus_consecutive
-            + occurrence.is_start as isize * self.scoring.bonus_word_start
+            + occurrence.is_start() as isize * self.scoring.bonus_word_start
             + self.case_bonus(query_idx - 1, occurrence)
     }
 }
