@@ -1,221 +1,94 @@
-use std::collections::{HashMap, HashSet};
+use bumpalo::{
+    Bump,
+    collections::{CollectIn, Vec},
+};
+use hashbrown::{HashMap, HashSet};
 
-pub type CharSet = HashSet<char>;
-pub type Occurrences = HashMap<char, Vec<Occurrence>>;
+pub type CharSet<'bump> = HashSet<char, hashbrown::DefaultHashBuilder, &'bump Bump>;
+pub type Occurrences<'bump> =
+    HashMap<char, Vec<'bump, Occurrence>, hashbrown::DefaultHashBuilder, &'bump Bump>;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[repr(align(8))]
 pub struct Occurrence {
     pub target_idx: u32,
-    data: u32,
 }
 
-impl Occurrence {
-    #[inline]
-    pub fn new(target_idx: u32, is_start: bool, char: char) -> Self {
-        assert_eq!(char as u32 & (1 << 31), 0);
-        Self {
-            target_idx,
-            data: ((is_start as u32) << 31) | char as u32,
-        }
-    }
-
-    #[inline]
-    pub fn is_start(self) -> bool {
-        (self.data >> 31) != 0
-    }
-
-    #[inline]
-    pub fn char(self) -> char {
-        unsafe { char::from_u32_unchecked(self.data & !(1 << 31)) }
-    }
-}
-
-pub fn build_occurrences(query: &QueryChars, string: &str, case_insensitive: bool) -> Occurrences {
+pub fn build_occurrences<'bump>(
+    bump: &'bump Bump,
+    query: &QueryChars,
+    string: &str,
+) -> Occurrences<'bump> {
     assert!(string.len() <= u32::MAX as usize);
 
-    let query_chars = condense(query, case_insensitive);
+    let mut query_chars = CharSet::<'bump>::new_in(bump);
+    query_chars.extend(query.iter().map(|qc| qc.lower));
 
-    let mut occurrences = HashMap::new();
-
-    let mut prev_is_upper = false;
-    let mut prev_is_sep = true;
-    let mut prev_is_start = false;
+    let mut occurrences = HashMap::new_in(bump);
 
     for (i, original_c) in string.chars().enumerate() {
         let lower_c = original_c.to_lowercase().next().unwrap();
 
-        let mut is_start = false;
-        let is_sep = is_word_sep(original_c);
-        let is_upper = original_c.is_uppercase();
-
-        let key_char = if case_insensitive {
-            lower_c
-        } else {
-            original_c
-        };
-
-        if is_sep {
-            prev_is_upper = false;
-            prev_is_sep = true;
-            prev_is_start = false;
-
-            if query_chars.contains(&key_char) {
-                occurrences
-                    .entry(key_char)
-                    .or_insert(Vec::new())
-                    .push(Occurrence::new(i as u32, is_start, original_c));
-            }
-
-            continue;
-        }
-
-        if prev_is_sep {
-            is_start = true;
-        } else {
-            if !prev_is_start && (prev_is_upper != is_upper) {
-                is_start = true;
-            }
-        }
+        let key_char = lower_c;
 
         if query_chars.contains(&key_char) {
             occurrences
                 .entry(key_char)
-                .or_insert(Vec::new())
-                .push(Occurrence::new(i as u32, is_start, original_c));
+                .or_insert(Vec::new_in(bump))
+                .push(Occurrence {
+                    target_idx: i as u32,
+                });
         }
-
-        prev_is_start = is_start;
-        prev_is_sep = is_sep;
-        prev_is_upper = is_upper;
     }
 
     occurrences
 }
 
-fn is_word_sep(c: char) -> bool {
-    !c.is_alphanumeric()
-}
+pub type QueryChars<'bump> = Vec<'bump, QueryChar>;
 
-fn condense(s: &QueryChars, case_insensitive: bool) -> CharSet {
-    s.iter()
-        .map(|qc| {
-            if case_insensitive {
-                qc.lower
-            } else {
-                qc.original
-            }
-        })
-        .collect()
-}
-
-pub type QueryChars = Vec<QueryChar>;
-
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct QueryChar {
-    pub original: char,
     pub lower: char,
 }
 
-impl Eq for QueryChar {}
-
-impl PartialEq for QueryChar {
-    fn eq(&self, other: &QueryChar) -> bool {
-        self.original == other.original && self.lower == other.lower
-    }
-}
-
-pub fn process_query(query: &str) -> QueryChars {
+pub fn process_query<'bump>(bump: &'bump Bump, query: &str) -> QueryChars<'bump> {
     query
         .chars()
         .filter(|c| !c.is_whitespace())
         .map(|c| QueryChar {
-            original: c,
             lower: c.to_lowercase().next().unwrap(),
         })
-        .collect::<Vec<QueryChar>>()
+        .collect_in::<Vec<QueryChar>>(bump)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-    use std::iter::FromIterator;
+    use bumpalo::{Bump, vec};
 
-    use super::{Occurrence, QueryChar, build_occurrences, condense, is_word_sep, process_query};
+    use crate::parsing::Occurrence;
 
-    #[test]
-    fn occurrence_repr() {
-        for c in char::MIN..=char::MAX {
-            let o = Occurrence::new(0, false, c);
-            assert!(!o.is_start());
-            assert_eq!(o.char(), c);
-
-            let o = Occurrence::new(0, true, c);
-            assert!(o.is_start());
-            assert_eq!(o.char(), c);
-        }
-    }
-
-    #[test]
-    fn word_seps() {
-        let seps: Vec<char> = vec![
-            '/', '\\', '|', '_', '-', ' ', '\t', ':', '.', ',', '~', '>', '<',
-        ];
-
-        assert!(seps.into_iter().all(|s| is_word_sep(s)));
-    }
-
-    #[test]
-    fn condense_casing() {
-        assert_eq!(
-            condense(&process_query("SCC"), true),
-            HashSet::from_iter(vec!['s', 'c']),
-            "Query chars not lowercased"
-        );
-        assert_eq!(
-            condense(&process_query("SCC"), false),
-            HashSet::from_iter(vec!['S', 'C']),
-            "Query chars not matching original case"
-        );
-    }
+    use super::{QueryChar, build_occurrences, process_query};
 
     #[test]
     fn query_processing() {
+        let bump = Bump::new();
+
         assert_eq!(
-            vec![
-                QueryChar {
-                    lower: 'a',
-                    original: 'a'
-                },
-                QueryChar {
-                    lower: 'b',
-                    original: 'b'
-                },
-                QueryChar {
-                    lower: 'c',
-                    original: 'c'
-                }
+            vec![in &bump;
+                QueryChar { lower: 'a' },
+                QueryChar { lower: 'b' },
+                QueryChar { lower: 'c' }
             ],
-            process_query("a b c"),
+            process_query(&bump, "a b c"),
             "Whitespace not removed"
         );
 
         assert_eq!(
-            vec![
-                QueryChar {
-                    lower: 'a',
-                    original: 'A'
-                },
-                QueryChar {
-                    lower: 'b',
-                    original: 'B'
-                },
-                QueryChar {
-                    lower: 'c',
-                    original: 'C'
-                }
+            vec![in &bump;
+                QueryChar { lower: 'a' },
+                QueryChar { lower: 'b' },
+                QueryChar { lower: 'c' }
             ],
-            process_query("ABC")
+            process_query(&bump, "ABC")
         );
     }
 
@@ -223,23 +96,24 @@ mod tests {
     fn occurrences() {
         let t = "SoccerCartoonController";
 
-        let mut occs = build_occurrences(&process_query("scc"), t, true);
+        let bump = Bump::new();
+        let mut occs = build_occurrences(&bump, &process_query(&bump, "scc"), t);
 
         assert_eq!(occs.len(), 2);
 
         let s = occs.remove(&'s').expect("Missing s occurrences");
 
-        assert_eq!(s, vec![Occurrence::new(0, true, 'S')]);
+        assert_eq!(s, vec![in &bump; Occurrence { target_idx: 0 }]);
 
         let c = occs.remove(&'c').expect("Missing c occurrences");
 
         assert_eq!(
             c,
-            vec![
-                Occurrence::new(2, false, 'c'),
-                Occurrence::new(3, false, 'c'),
-                Occurrence::new(6, true, 'C'),
-                Occurrence::new(13, true, 'C'),
+            vec![in &bump;
+                Occurrence { target_idx: 2 },
+                Occurrence { target_idx: 3 },
+                Occurrence { target_idx: 6 },
+                Occurrence { target_idx: 13 },
             ]
         );
     }
@@ -248,7 +122,8 @@ mod tests {
     fn occurrences_2() {
         let t = "SccsCoolController";
 
-        let mut occs = build_occurrences(&process_query("scc"), t, true);
+        let bump = Bump::new();
+        let mut occs = build_occurrences(&bump, &process_query(&bump, "scc"), t);
 
         assert_eq!(occs.len(), 2);
 
@@ -256,21 +131,18 @@ mod tests {
 
         assert_eq!(
             s,
-            vec![
-                Occurrence::new(0, true, 'S'),
-                Occurrence::new(3, false, 's')
-            ]
+            vec![in &bump; Occurrence { target_idx: 0 }, Occurrence { target_idx: 3 }]
         );
 
         let c = occs.remove(&'c').expect("Missing c occurrences");
 
         assert_eq!(
             c,
-            vec![
-                Occurrence::new(1, false, 'c'),
-                Occurrence::new(2, false, 'c'),
-                Occurrence::new(4, true, 'C'),
-                Occurrence::new(8, true, 'C'),
+            vec![in &bump;
+                Occurrence { target_idx: 1 },
+                Occurrence { target_idx: 2 },
+                Occurrence { target_idx: 4 },
+                Occurrence { target_idx: 8 },
             ]
         );
     }

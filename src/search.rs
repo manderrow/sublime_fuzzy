@@ -20,7 +20,6 @@ use crate::scoring::{DEFAULT_SCORING, Scoring};
 ///
 /// let result = FuzzySearch::new("something", "Some Search Thing")
 ///     .score_with(&scoring)
-///     .case_insensitive()
 ///     .best_match();
 ///
 /// assert!(result.is_some());
@@ -29,7 +28,6 @@ pub struct FuzzySearch<'a> {
     query: &'a str,
     target: &'a str,
     scoring: Option<&'a Scoring>,
-    case_insensitive: bool,
 }
 
 impl<'a> FuzzySearch<'a> {
@@ -41,7 +39,6 @@ impl<'a> FuzzySearch<'a> {
             query,
             target,
             scoring: None,
-            case_insensitive: true,
         }
     }
 
@@ -54,45 +51,24 @@ impl<'a> FuzzySearch<'a> {
         self
     }
 
-    /// Only match query chars in the target string if case matches.
-    ///
-    /// [`Scoring::bonus_match_case`] will not be applied if this is set (because a char match will
-    /// always also be a case match).
-    pub fn case_sensitive(mut self) -> Self {
-        self.case_insensitive = false;
-
-        self
-    }
-
-    /// Ignore case when matching query chars in the target string.
-    ///
-    /// If not only the char but also the case matches, [`Scoring::bonus_match_case`] will be added to
-    /// the score. If that behavior is not wanted the bonus can be set to 0 with custom scoring.
-    pub fn case_insensitive(mut self) -> Self {
-        self.case_insensitive = true;
-
-        self
-    }
-
     /// Finds the best match of the query in the target string.
     ///
     /// Always tries to match the _full_ pattern. A partial match is considered
     /// invalid and will return [`None`]. Will also return [`None`] in case the query or
     /// target string are empty.
     pub fn best_match<'bump>(self, bump: &'bump Bump) -> Option<&'bump Match<'bump>> {
-        let processed_query = process_query(self.query);
+        let processed_query = process_query(&bump, self.query);
 
         if processed_query.len() == 0 || self.target.len() == 0 {
             return None;
         }
 
-        let occurrences = build_occurrences(&processed_query, self.target, self.case_insensitive);
+        let occurrences = build_occurrences(&bump, &processed_query, self.target);
 
         let searcher = FuzzySearcher::new(
             bump,
             processed_query,
             self.scoring.unwrap_or(&DEFAULT_SCORING),
-            self.case_insensitive,
             self.target.len(),
         );
 
@@ -102,7 +78,8 @@ impl<'a> FuzzySearch<'a> {
 
 struct FuzzySearcher<'a, 'bump> {
     bump: &'bump Bump,
-    query: QueryChars,
+    // TODO: should we store this as a &str instead?
+    query: QueryChars<'bump>,
     scoring: &'a Scoring,
     match_cache: HashMap<
         (u32, u32, u32),
@@ -110,7 +87,6 @@ struct FuzzySearcher<'a, 'bump> {
         hashbrown::DefaultHashBuilder,
         &'bump Bump,
     >,
-    case_insensitive: bool,
 }
 
 //pub static CACHE_HITS: AtomicU64 = AtomicU64::new(0);
@@ -119,9 +95,8 @@ struct FuzzySearcher<'a, 'bump> {
 impl<'a, 'bump> FuzzySearcher<'a, 'bump> {
     fn new(
         bump: &'bump Bump,
-        query: QueryChars,
+        query: QueryChars<'bump>,
         scoring: &'a Scoring,
-        case_insensitive: bool,
         haystack_len: usize,
     ) -> Self {
         FuzzySearcher {
@@ -130,29 +105,12 @@ impl<'a, 'bump> FuzzySearcher<'a, 'bump> {
             match_cache: HashMap::with_capacity_in(query.len() * query.len(), bump),
             query,
             scoring,
-            case_insensitive,
         }
     }
 
     #[inline(always)]
     fn queried_char(&self, qc: &QueryChar) -> char {
-        if self.case_insensitive {
-            qc.lower
-        } else {
-            qc.original
-        }
-    }
-
-    #[inline(always)]
-    fn case_bonus(&self, query_idx: u32, occurrence: &Occurrence) -> isize {
-        if self.case_insensitive {
-            self.query
-                .get(query_idx as usize)
-                .map_or(0, |c| (c.original == occurrence.char()) as isize)
-                * self.scoring.bonus_match_case
-        } else {
-            0
-        }
+        qc.lower
     }
 
     fn best_match(mut self, occurrences: &Occurrences) -> Option<&'bump Match<'bump>> {
@@ -186,7 +144,7 @@ impl<'a, 'bump> FuzzySearcher<'a, 'bump> {
             // Successfully matched all query chars
 
             let this_match = self.bump.alloc(Match::with_matched(
-                self.match_calc_score(query_idx, occurrence, consecutive),
+                self.match_calc_score(consecutive),
                 consecutive,
                 vec![in &self.bump; occurrence.target_idx],
             ));
@@ -218,7 +176,7 @@ impl<'a, 'bump> FuzzySearcher<'a, 'bump> {
             .map(|m| {
                 let m = self.bump.alloc((*m).clone());
                 m.prepend(
-                    self.match_calc_score(query_idx, occurrence, consecutive),
+                    self.match_calc_score(consecutive),
                     consecutive,
                     &[occurrence.target_idx],
                     &self.scoring,
@@ -236,9 +194,7 @@ impl<'a, 'bump> FuzzySearcher<'a, 'bump> {
         self.match_cache.insert(key, m);
     }
 
-    fn match_calc_score(&self, query_idx: u32, occurrence: &Occurrence, consecutive: u32) -> isize {
+    fn match_calc_score(&self, consecutive: u32) -> isize {
         consecutive as isize * self.scoring.bonus_consecutive
-            + occurrence.is_start() as isize * self.scoring.bonus_word_start
-            + self.case_bonus(query_idx - 1, occurrence)
     }
 }

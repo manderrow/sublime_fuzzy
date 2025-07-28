@@ -65,7 +65,6 @@ let scoring = Scoring {
 };
 
 let result = FuzzySearch::new("something", "some search thing")
-    .case_sensitive()
     .score_with(&scoring)
     .best_match();
 

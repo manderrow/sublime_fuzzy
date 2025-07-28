@@ -62,7 +62,6 @@
 //! };
 //!
 //! let result = FuzzySearch::new("something", "some search thing")
-//!     .case_sensitive()
 //!     .score_with(&scoring)
 //!     .best_match();
 //!
@@ -111,9 +110,7 @@ pub fn best_match<'bump>(
     query: &str,
     target: &str,
 ) -> Option<&'bump Match<'bump>> {
-    FuzzySearch::new(query, target)
-        .case_insensitive()
-        .best_match(bump)
+    FuzzySearch::new(query, target).best_match(bump)
 }
 
 /// Formats a [`Match`] by appending `before` before any matches and `after`
@@ -221,7 +218,7 @@ mod tests {
     }
 
     #[test]
-    fn case_sensitivity() {
+    fn case_insensitivity() {
         let bump = Bump::new();
         assert!(
             best_match(&bump, "ttt", "The Two Towers").is_some(),
@@ -240,12 +237,12 @@ mod tests {
     }
 
     #[test]
-    fn case_sensitivity_scoring() {
+    fn case_insensitive_scoring() {
         let bump = Bump::new();
         let non_case_match = best_match(&bump, "ttt", "The Two Towers").unwrap();
         let case_match = best_match(&bump, "TTT", "The Two Towers").unwrap();
 
-        assert!(non_case_match.score() < case_match.score());
+        assert!(non_case_match.score() == case_match.score());
     }
 
     #[test]
@@ -274,11 +271,7 @@ mod tests {
 
         assert_eq!(
             m.continuous_matches().collect::<Vec<ContinuousMatch>>(),
-            vec![
-                ContinuousMatch::new(0, 1),
-                ContinuousMatch::new(4, 1),
-                ContinuousMatch::new(8, 1)
-            ]
+            vec![ContinuousMatch::new(0, 3)]
         );
     }
 
