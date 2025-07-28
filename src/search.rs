@@ -89,9 +89,6 @@ struct FuzzySearcher<'a, 'bump> {
     >,
 }
 
-//pub static CACHE_HITS: AtomicU64 = AtomicU64::new(0);
-//pub static CACHE_MISSES: AtomicU64 = AtomicU64::new(0);
-
 impl<'a, 'bump> FuzzySearcher<'a, 'bump> {
     fn new(
         bump: &'bump Bump,
@@ -134,10 +131,7 @@ impl<'a, 'bump> FuzzySearcher<'a, 'bump> {
 
         // Already scored sub-tree
         if let Some(cached) = self.match_cache.get(&this_key) {
-            //CACHE_HITS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             return *cached;
-        } else {
-            //CACHE_MISSES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
 
         let Some(next_char) = self.query.get(query_idx as usize) else {

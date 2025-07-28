@@ -81,7 +81,6 @@ use bumpalo::Bump;
 pub use matching::{ContinuousMatch, ContinuousMatches, Match};
 pub use scoring::Scoring;
 pub use search::FuzzySearch;
-//pub use search::{CACHE_HITS, CACHE_MISSES};
 
 /// Returns the best match for `query` in the target string `string`.
 ///

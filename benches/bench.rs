@@ -11,34 +11,14 @@ use sublime_fuzzy::{best_match, format_simple};
 
 fn bench_group(c: &mut Criterion) {
     c.bench_function("empty", empty);
-    dump_cache_stats();
     c.bench_function("short", short);
-    dump_cache_stats();
     c.bench_function("url", url);
-    dump_cache_stats();
     c.bench_function("url format", url_format);
-    dump_cache_stats();
     c.bench_function("medium start", medium_start);
-    dump_cache_stats();
     c.bench_function("medium_middle", medium_middle);
-    dump_cache_stats();
     c.bench_function("medium_end", medium_end);
-    dump_cache_stats();
     c.bench_function("long_start_close", long_start_close);
-    dump_cache_stats();
     c.bench_function("long_middle_close", long_middle_close);
-    dump_cache_stats();
-}
-
-fn dump_cache_stats() {
-    /*println!(
-        "  hits: {}",
-        sublime_fuzzy::CACHE_HITS.swap(0, std::sync::atomic::Ordering::Relaxed)
-    );
-    println!(
-        "misses: {}",
-        sublime_fuzzy::CACHE_MISSES.swap(0, std::sync::atomic::Ordering::Relaxed)
-    );*/
 }
 
 fn empty(b: &mut Bencher) {
