@@ -18,8 +18,16 @@ name = "sfz"
 path = "src/main.rs"
 
 [dependencies]
-bumpalo = { version = "3.19.0", features = ["collections"] }
+bumpalo = { version = "3.19.0", features = ["allocator-api2", "collections"] }
+hashbrown = "0.15.4"
 serde = { version = "1", features = ["derive"], optional = true }
 
 [features]
 serde = ["dep:serde"]
+
+[dev-dependencies]
+criterion = "0.7"
+
+[[bench]]
+name = "bench"
+harness = false

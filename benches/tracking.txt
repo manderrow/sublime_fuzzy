@@ -1,0 +1,1 @@
+This is a tracking issue for the #[bench] attribute and its stability in the compiler. Currently it is not possible to use this from stable Rust as it requires extern crate test which is itself not stable.

@@ -78,9 +78,11 @@ mod parsing;
 mod scoring;
 mod search;
 
+use bumpalo::Bump;
 pub use matching::{ContinuousMatch, ContinuousMatches, Match};
 pub use scoring::Scoring;
 pub use search::FuzzySearch;
+//pub use search::{CACHE_HITS, CACHE_MISSES};
 
 /// Returns the best match for `query` in the target string `string`.
 ///
@@ -104,10 +106,14 @@ pub use search::FuzzySearch;
 /// assert_eq!(m.score(), 172);
 /// ```
 ///
-pub fn best_match(query: &str, target: &str) -> Option<Match> {
+pub fn best_match<'bump>(
+    bump: &'bump Bump,
+    query: &str,
+    target: &str,
+) -> Option<&'bump Match<'bump>> {
     FuzzySearch::new(query, target)
         .case_insensitive()
-        .best_match()
+        .best_match(bump)
 }
 
 /// Formats a [`Match`] by appending `before` before any matches and `after`
@@ -173,6 +179,8 @@ pub fn format_simple(match_: &Match, target: &str, before: &str, after: &str) ->
 
 #[cfg(test)]
 mod tests {
+    use bumpalo::Bump;
+
     use crate::{best_match, format_simple, matching::ContinuousMatch};
 
     #[test]
@@ -182,65 +190,74 @@ mod tests {
 
     #[test]
     fn full_match() {
-        assert!(best_match("test", "test").is_some());
+        let bump = Bump::new();
+        assert!(best_match(&bump, "test", "test").is_some());
     }
 
     #[test]
     fn any_match() {
-        assert!(best_match("towers", "the two towers").is_some());
+        let bump = Bump::new();
+        assert!(best_match(&bump, "towers", "the two towers").is_some());
     }
 
     #[test]
     fn no_match() {
-        assert_eq!(best_match("abc", "def"), None);
+        let bump = Bump::new();
+        assert_eq!(best_match(&bump, "abc", "def"), None);
     }
 
     #[test]
     fn basic() {
-        let r = best_match("scc", "soccer cartoon controller");
+        let bump = Bump::new();
+        let r = best_match(&bump, "scc", "soccer cartoon controller");
 
         assert!(r.is_some());
     }
 
     #[test]
     fn partial_match_none() {
-        assert_eq!(best_match("partial", "part"), None);
+        let bump = Bump::new();
+        assert_eq!(best_match(&bump, "partial", "part"), None);
     }
 
     #[test]
     fn case_sensitivity() {
+        let bump = Bump::new();
         assert!(
-            best_match("ttt", "The Two Towers").is_some(),
+            best_match(&bump, "ttt", "The Two Towers").is_some(),
             "Lower query chars do not match upper target chars"
         );
 
         assert!(
-            best_match("TTT", "The Two Towers").is_some(),
+            best_match(&bump, "TTT", "The Two Towers").is_some(),
             "Upper query chars do not match upper target chars"
         );
 
         assert!(
-            best_match("TTT", "the two towers").is_some(),
+            best_match(&bump, "TTT", "the two towers").is_some(),
             "Upper query chars do not match lower target chars"
         );
     }
 
     #[test]
     fn case_sensitivity_scoring() {
-        let non_case_match = best_match("ttt", "The Two Towers").unwrap();
-        let case_match = best_match("TTT", "The Two Towers").unwrap();
+        let bump = Bump::new();
+        let non_case_match = best_match(&bump, "ttt", "The Two Towers").unwrap();
+        let case_match = best_match(&bump, "TTT", "The Two Towers").unwrap();
 
         assert!(non_case_match.score() < case_match.score());
     }
 
     #[test]
     fn whitespace() {
-        assert!(best_match("t t", "The Two Towers").is_some());
+        let bump = Bump::new();
+        assert!(best_match(&bump, "t t", "The Two Towers").is_some());
     }
 
     #[test]
     fn word_starts_count_more() {
-        let r = best_match("something", "some search thing");
+        let bump = Bump::new();
+        let r = best_match(&bump, "something", "some search thing");
 
         assert_eq!(
             r.unwrap()
@@ -252,7 +269,8 @@ mod tests {
 
     #[test]
     fn word_starts_count_more_2() {
-        let m = best_match("scc", "SccsCoolController").unwrap();
+        let bump = Bump::new();
+        let m = best_match(&bump, "scc", "SccsCoolController").unwrap();
 
         assert_eq!(
             m.continuous_matches().collect::<Vec<ContinuousMatch>>(),
@@ -266,25 +284,29 @@ mod tests {
 
     #[test]
     fn empty_query() {
-        assert_eq!(best_match("", "test"), None);
+        let bump = Bump::new();
+        assert_eq!(best_match(&bump, "", "test"), None);
     }
 
     #[test]
     fn empty_target() {
-        assert_eq!(best_match("test", ""), None);
+        let bump = Bump::new();
+        assert_eq!(best_match(&bump, "test", ""), None);
     }
 
     #[test]
     fn distance_to_first_is_ignored() {
-        let a = best_match("release", "some_release").unwrap();
-        let b = best_match("release", "a_release").unwrap();
+        let bump = Bump::new();
+        let a = best_match(&bump, "release", "some_release").unwrap();
+        let b = best_match(&bump, "release", "a_release").unwrap();
 
         assert_eq!(a.score(), b.score());
     }
 
     #[test]
     fn matches_unicode() {
-        let m = best_match("👀", "🦀 👈 👀").unwrap();
+        let bump = Bump::new();
+        let m = best_match(&bump, "👀", "🦀 👈 👀").unwrap();
 
         assert_eq!(m.matched_indices().copied().collect::<Vec<_>>(), vec![4]);
     }
@@ -292,7 +314,8 @@ mod tests {
     #[test]
     fn formats_unicode() {
         let s = "🦀 👈 👀";
-        let m = best_match("👀", s).unwrap();
+        let bump = Bump::new();
+        let m = best_match(&bump, "👀", s).unwrap();
 
         assert_eq!(format_simple(&m, s, "<", ">"), "🦀 👈 <👀>");
     }

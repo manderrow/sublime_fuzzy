@@ -1,0 +1,1 @@
+https://some-domain.io/api/tenant/1/group/some-group/setup/c4b158c3-047f-48d8-8f7a-8ac20d20460b/lists/services/?before=2020-01-01

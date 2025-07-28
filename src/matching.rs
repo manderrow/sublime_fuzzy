@@ -1,5 +1,7 @@
 use std::cmp::Ordering;
 
+use bumpalo::collections::Vec;
+
 use crate::Scoring;
 
 type Uint = u32;
@@ -10,21 +12,36 @@ type Uint = u32;
 /// The score is not clamped to any range and can be negative.
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Match {
+pub struct Match<'bump> {
     /// Accumulative score
     score: isize,
     /// Count of current consecutive matched chars
     consecutive: Uint,
-    /// Matched char indices
-    matched: Vec<u32>,
+    /// Matched char indices. Filled from back to front.
+    //matched: Box<[Uint]>,
+    /// Index of the first match index in the matched array.
+    //matched_start: Uint,
+    /// Matched char indices. Elements are in reverse order.
+    matched: Vec<'bump, Uint>,
 }
 
-impl Match {
+impl<'bump> Match<'bump> {
     /// Creates a new match with the given scoring and matched indices.
-    pub(crate) fn with_matched(score: isize, consecutive: Uint, matched: Vec<u32>) -> Self {
+    ///
+    /// Panics if `matched` is empty.
+    #[inline]
+    pub(crate) fn with_matched(
+        score: isize,
+        consecutive: Uint,
+        mut matched: Vec<'bump, Uint>,
+    ) -> Self {
+        matched.reverse();
         Match {
             score,
             consecutive,
+            // FIXME: error on overflow
+            //matched: vec![matched; matched as usize + 1].into_boxed_slice(),
+            //matched_start: matched,
             matched,
         }
     }
@@ -35,66 +52,77 @@ impl Match {
     }
 
     /// Returns an iterator over the matched char indices.
-    pub fn matched_indices(&self) -> std::slice::Iter<u32> {
-        self.matched.iter()
+    pub fn matched_indices(&self) -> std::iter::Rev<std::slice::Iter<'_, Uint>> {
+        //self.matched[self.matched_start as usize..].iter()
+        self.matched.iter().rev()
     }
 
     /// Returns an iterator that groups the individual char matches into groups.
     pub fn continuous_matches(&self) -> ContinuousMatches {
         ContinuousMatches {
+            //matched: &self.matched[self.matched_start as usize..],
             matched: &self.matched,
             current: 0,
         }
     }
 
     /// Extends this match with `other`.
-    pub fn extend_with(&mut self, other: &Match, scoring: &Scoring) {
-        self.score += other.score;
-        self.consecutive += other.consecutive;
+    pub fn prepend(&mut self, score: isize, consecutive: Uint, indices: &[u32], scoring: &Scoring) {
+        self.score += score;
+        self.consecutive += consecutive;
 
-        if let (Some(last), Some(first)) = (self.matched.last(), other.matched.first()) {
-            let distance = first - last;
+        // remember, these arrays are in reverse order.
+        let (last, first) = (indices[0], self.matched.last().unwrap());
+        let distance = first - last;
 
-            match distance {
-                0 => {}
-                1 => {
-                    self.consecutive += 1;
-                    self.score += self.consecutive as isize * scoring.bonus_consecutive;
-                }
-                _ => {
-                    self.consecutive = 0;
-                    let penalty = (distance as isize - 1) * scoring.penalty_distance;
-                    self.score -= penalty;
-                }
+        match distance {
+            0 => {}
+            1 => {
+                self.consecutive += 1;
+                self.score += self.consecutive as isize * scoring.bonus_consecutive;
+            }
+            _ => {
+                self.consecutive = 0;
+                let penalty = (distance as isize - 1) * scoring.penalty_distance;
+                self.score -= penalty;
             }
         }
 
-        self.matched.extend_from_slice(&other.matched);
+        self.matched.extend_from_slice(indices);
+    }
+
+    pub fn prepend_match(&mut self, other: &Match, scoring: &Scoring) {
+        self.prepend(other.score, other.consecutive, &other.matched, scoring);
+    }
+
+    pub fn extend_with(&mut self, mut other: Match<'bump>, scoring: &Scoring) {
+        other.prepend_match(self, scoring);
+        *self = other;
     }
 }
 
-impl Ord for Match {
-    fn cmp(&self, other: &Match) -> Ordering {
+impl Ord for Match<'_> {
+    fn cmp(&self, other: &Self) -> Ordering {
         self.score.cmp(&other.score)
     }
 }
 
-impl PartialOrd for Match {
-    fn partial_cmp(&self, other: &Match) -> Option<Ordering> {
+impl PartialOrd for Match<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Eq for Match {}
+impl Eq for Match<'_> {}
 
-impl PartialEq for Match {
+impl PartialEq for Match<'_> {
     fn eq(&self, other: &Match) -> bool {
         self.score == other.score
     }
 }
 
 /// Describes a continuous group of char indices
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct ContinuousMatch {
     start: Uint,
     len: Uint,
@@ -126,7 +154,7 @@ impl PartialEq for ContinuousMatch {
 
 /// Iterator returning [`ContinuousMatch`]es from the matched char indices in a [`Match`]
 pub struct ContinuousMatches<'a> {
-    matched: &'a [u32],
+    matched: &'a [Uint],
     current: usize,
 }
 
@@ -139,11 +167,11 @@ impl<'a> Iterator for ContinuousMatches<'_> {
 
         let mut last_idx = None;
 
-        for idx in self.matched.iter().skip(self.current) {
+        for &idx in self.matched.iter().rev().skip(self.current) {
             start = start.or(Some(idx));
 
             if last_idx.is_some() && (idx - last_idx.unwrap() != 1) {
-                return Some(ContinuousMatch::new(*start.unwrap(), len));
+                return Some(ContinuousMatch::new(start.unwrap(), len));
             }
 
             self.current += 1;
@@ -152,7 +180,7 @@ impl<'a> Iterator for ContinuousMatches<'_> {
         }
 
         if last_idx.is_some() {
-            return Some(ContinuousMatch::new(*start.unwrap(), len));
+            return Some(ContinuousMatch::new(start.unwrap(), len));
         }
 
         None
@@ -161,17 +189,22 @@ impl<'a> Iterator for ContinuousMatches<'_> {
 
 #[cfg(test)]
 mod tests {
+    use bumpalo::collections::{CollectIn, Vec};
+    use bumpalo::{Bump, vec};
+
     use crate::Scoring;
 
     use super::{ContinuousMatch, Match};
 
     #[test]
     fn continuous() {
-        let m = Match::with_matched(0, 0, vec![0, 1, 2, 5, 6, 10].into_iter().collect());
+        let bump = Bump::new();
+        let m = Match::with_matched(0, 0, vec![in &bump; 0, 1, 2, 5, 6, 10]);
 
         assert_eq!(
-            m.continuous_matches().collect::<Vec<ContinuousMatch>>(),
-            vec![
+            m.continuous_matches()
+                .collect_in::<Vec<ContinuousMatch>>(&bump),
+            vec![in &bump;
                 ContinuousMatch { start: 0, len: 3 },
                 ContinuousMatch { start: 5, len: 2 },
                 ContinuousMatch { start: 10, len: 1 },
@@ -181,12 +214,13 @@ mod tests {
 
     #[test]
     fn extend_match() {
-        let mut a = Match::with_matched(16, 3, vec![1, 2, 3].into_iter().collect());
-        let b = Match::with_matched(8, 3, vec![5, 6, 7].into_iter().collect());
+        let bump = Bump::new();
+        let mut a = Match::with_matched(16, 3, vec![in &bump; 1, 2, 3]);
+        let b = Match::with_matched(8, 3, vec![in &bump; 5, 6, 7]);
 
         let s = Scoring::default();
 
-        a.extend_with(&b, &s);
+        a.extend_with(b, &s);
 
         assert_eq!(a.score(), 24 - s.penalty_distance);
         assert_eq!(a.consecutive, 0);
@@ -195,12 +229,13 @@ mod tests {
 
     #[test]
     fn extend_match_cont() {
-        let mut a = Match::with_matched(16, 3, vec![1, 2, 3].into_iter().collect());
-        let b = Match::with_matched(8, 3, vec![4, 5, 6].into_iter().collect());
+        let bump = Bump::new();
+        let mut a = Match::with_matched(16, 3, vec![in &bump; 1, 2, 3]);
+        let b = Match::with_matched(8, 3, vec![in &bump; 4, 5, 6]);
 
         let s = Scoring::default();
 
-        a.extend_with(&b, &s);
+        a.extend_with(b, &s);
 
         assert_eq!(a.score(), 16 + 8 + (3 + 3 + 1) * s.bonus_consecutive);
         assert_eq!(a.consecutive, 3 + 3 + 1);

@@ -1,6 +1,7 @@
-use std::collections::HashMap;
+use std::rc::Rc;
 
-use roaring::RoaringBitmap;
+use bumpalo::{Bump, vec};
+use hashbrown::HashMap;
 
 use crate::matching::Match;
 use crate::parsing::{
@@ -80,7 +81,7 @@ impl<'a> FuzzySearch<'a> {
     /// Always tries to match the _full_ pattern. A partial match is considered
     /// invalid and will return [`None`]. Will also return [`None`] in case the query or
     /// target string are empty.
-    pub fn best_match(self) -> Option<Match> {
+    pub fn best_match<'bump>(self, bump: &'bump Bump) -> Option<&'bump Match<'bump>> {
         let processed_query = process_query(self.query);
 
         if processed_query.len() == 0 || self.target.len() == 0 {
@@ -90,26 +91,45 @@ impl<'a> FuzzySearch<'a> {
         let occurrences = build_occurrences(&processed_query, self.target, self.case_insensitive);
 
         let searcher = FuzzySearcher::new(
+            bump,
             processed_query,
             self.scoring.unwrap_or(&DEFAULT_SCORING),
             self.case_insensitive,
+            self.target.len(),
         );
 
         searcher.best_match(&occurrences)
     }
 }
 
-struct FuzzySearcher<'a> {
+struct FuzzySearcher<'a, 'bump> {
+    bump: &'bump Bump,
     query: QueryChars,
     scoring: &'a Scoring,
-    match_cache: HashMap<(u32, u32, u32), Option<Match>>,
+    match_cache: HashMap<
+        (u32, u32, u32),
+        Option<&'bump Match<'bump>>,
+        hashbrown::DefaultHashBuilder,
+        &'bump Bump,
+    >,
     case_insensitive: bool,
 }
 
-impl<'a> FuzzySearcher<'a> {
-    fn new(query: QueryChars, scoring: &'a Scoring, case_insensitive: bool) -> Self {
+//pub static CACHE_HITS: AtomicU64 = AtomicU64::new(0);
+//pub static CACHE_MISSES: AtomicU64 = AtomicU64::new(0);
+
+impl<'a, 'bump> FuzzySearcher<'a, 'bump> {
+    fn new(
+        bump: &'bump Bump,
+        query: QueryChars,
+        scoring: &'a Scoring,
+        case_insensitive: bool,
+        haystack_len: usize,
+    ) -> Self {
         FuzzySearcher {
-            match_cache: HashMap::with_capacity(query.len() * query.len()),
+            bump,
+            // match_cache: HashMap::with_capacity_in(query.len() * query.len() * haystack_len, bump),
+            match_cache: HashMap::with_capacity_in(query.len() * query.len(), bump),
             query,
             scoring,
             case_insensitive,
@@ -137,7 +157,7 @@ impl<'a> FuzzySearcher<'a> {
         }
     }
 
-    fn best_match(mut self, occurrences: &Occurrences) -> Option<Match> {
+    fn best_match(mut self, occurrences: &Occurrences) -> Option<&'bump Match<'bump>> {
         let qc = self.query.get(0)?;
 
         occurrences
@@ -153,40 +173,40 @@ impl<'a> FuzzySearcher<'a> {
         occurrence: &Occurrence,
         consecutive: u32,
         occurrences: &Occurrences,
-    ) -> Option<Match> {
+    ) -> Option<&'bump Match<'bump>> {
         let this_key = (query_idx, occurrence.target_idx, consecutive);
 
         // Already scored sub-tree
         if let Some(cached) = self.match_cache.get(&this_key) {
-            return cached.clone();
+            //CACHE_HITS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return *cached;
+        } else {
+            //CACHE_MISSES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
 
-        let next_char = self.query.get(query_idx as usize);
+        let Some(next_char) = self.query.get(query_idx as usize) else {
+            // Successfully matched all query chars
 
-        let score = consecutive as isize * self.scoring.bonus_consecutive
-            + occurrence.is_start as isize * self.scoring.bonus_word_start
-            + self.case_bonus(query_idx - 1, occurrence);
+            let this_match = self.bump.alloc(Match::with_matched(
+                self.match_calc_score(query_idx, occurrence, consecutive),
+                consecutive,
+                vec![in &self.bump; occurrence.target_idx],
+            ));
 
-        let mut this_match = Match::with_matched(score, consecutive, vec![occurrence.target_idx]);
-
-        // Successfully matched all query chars
-        if next_char.is_none() {
-            self.match_cache.insert(this_key, Some(this_match.clone()));
+            self.insert_match(this_key, Some(this_match));
 
             return Some(this_match);
-        }
+        };
 
-        let occs = occurrences.get(&self.queried_char(next_char.unwrap()));
+        let Some(occs) = occurrences.get(&self.queried_char(next_char)) else {
+            // Reached end of target without matching all query chars
 
-        // Reached end of target without matching all query chars
-        if occs.is_none() {
-            self.match_cache.insert(this_key, None);
+            self.insert_match(this_key, None);
 
             return None;
-        }
+        };
 
         let best_match = occs
-            .unwrap()
             .iter()
             .filter(|&o| o.target_idx > occurrence.target_idx)
             .filter_map(|o| {
@@ -197,14 +217,30 @@ impl<'a> FuzzySearcher<'a> {
                 self.match_(query_idx + 1, o, new_consecutive, occurrences)
             })
             .max()
-            .and_then(|m| {
-                this_match.extend_with(&m, &self.scoring);
-
-                Some(this_match)
+            .map(|m| {
+                let m = self.bump.alloc((*m).clone());
+                m.prepend(
+                    self.match_calc_score(query_idx, occurrence, consecutive),
+                    consecutive,
+                    &[occurrence.target_idx],
+                    &self.scoring,
+                );
+                &*m
             });
 
-        self.match_cache.insert(this_key, best_match.clone());
+        self.insert_match(this_key, best_match);
 
         best_match
+    }
+
+    fn insert_match(&mut self, key: (u32, u32, u32), m: Option<&'bump Match<'bump>>) {
+        //assert!(self.match_cache.capacity() > self.match_cache.len());
+        self.match_cache.insert(key, m);
+    }
+
+    fn match_calc_score(&self, query_idx: u32, occurrence: &Occurrence, consecutive: u32) -> isize {
+        consecutive as isize * self.scoring.bonus_consecutive
+            + occurrence.is_start as isize * self.scoring.bonus_word_start
+            + self.case_bonus(query_idx - 1, occurrence)
     }
 }

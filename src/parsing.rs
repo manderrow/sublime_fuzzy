@@ -32,12 +32,9 @@ pub fn build_occurrences(query: &QueryChars, string: &str, case_insensitive: boo
     let mut prev_is_sep = true;
     let mut prev_is_start = false;
 
-    for (i, (lower_c, original_c)) in string
-        .chars()
-        .flat_map(|c| c.to_lowercase())
-        .zip(string.chars())
-        .enumerate()
-    {
+    for (i, original_c) in string.chars().enumerate() {
+        let lower_c = original_c.to_lowercase().next().unwrap();
+
         let mut is_start = false;
         let is_sep = is_word_sep(original_c);
         let is_upper = original_c.is_uppercase();
@@ -99,13 +96,15 @@ fn is_word_sep(c: char) -> bool {
 }
 
 fn condense(s: &QueryChars, case_insensitive: bool) -> CharSet {
-    HashSet::from_iter(s.iter().map(|qc| {
-        if case_insensitive {
-            qc.lower
-        } else {
-            qc.original
-        }
-    }))
+    s.iter()
+        .map(|qc| {
+            if case_insensitive {
+                qc.lower
+            } else {
+                qc.original
+            }
+        })
+        .collect()
 }
 
 pub type QueryChars = Vec<QueryChar>;
@@ -125,17 +124,12 @@ impl PartialEq for QueryChar {
 }
 
 pub fn process_query(query: &str) -> QueryChars {
-    let lower_query = query.to_lowercase();
-
     query
         .chars()
-        .zip(lower_query.chars())
-        .filter_map(|(original, lower)| {
-            if original.is_whitespace() {
-                return None;
-            }
-
-            Some(QueryChar { original, lower })
+        .filter(|c| !c.is_whitespace())
+        .map(|c| QueryChar {
+            original: c,
+            lower: c.to_lowercase().next().unwrap(),
         })
         .collect::<Vec<QueryChar>>()
 }

@@ -1,0 +1,5 @@
+The empty benchmark is there as a baseline. An anecdote: In my first
+          compilation of the benchmark, I forgot to add -O to the rustc command
+          line, and wound up with a few ns/iter on an empty benchmark. Thus, I
+          now always have an empty benchmark in my list, to make sure I benchmark
+          an optimized version.

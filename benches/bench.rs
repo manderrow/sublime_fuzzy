@@ -2,86 +2,127 @@
 extern crate sublime_fuzzy;
 extern crate test;
 
-use sublime_fuzzy::{best_match, format_simple};
-use test::Bencher;
+use std::hint::black_box;
 
-#[bench]
+use bumpalo::Bump;
+use criterion::{Bencher, Criterion, criterion_group, criterion_main};
+
+use sublime_fuzzy::{best_match, format_simple};
+
+fn bench_group(c: &mut Criterion) {
+    c.bench_function("empty", empty);
+    dump_cache_stats();
+    c.bench_function("short", short);
+    dump_cache_stats();
+    c.bench_function("url", url);
+    dump_cache_stats();
+    c.bench_function("url format", url_format);
+    dump_cache_stats();
+    c.bench_function("medium start", medium_start);
+    dump_cache_stats();
+    c.bench_function("medium_middle", medium_middle);
+    dump_cache_stats();
+    c.bench_function("medium_end", medium_end);
+    dump_cache_stats();
+    c.bench_function("long_start_close", long_start_close);
+    dump_cache_stats();
+    c.bench_function("long_middle_close", long_middle_close);
+    dump_cache_stats();
+}
+
+fn dump_cache_stats() {
+    /*println!(
+        "  hits: {}",
+        sublime_fuzzy::CACHE_HITS.swap(0, std::sync::atomic::Ordering::Relaxed)
+    );
+    println!(
+        "misses: {}",
+        sublime_fuzzy::CACHE_MISSES.swap(0, std::sync::atomic::Ordering::Relaxed)
+    );*/
+}
+
 fn empty(b: &mut Bencher) {
     b.iter(|| 1);
 }
 
-#[bench]
 fn short(b: &mut Bencher) {
+    let mut bump = Bump::new();
     b.iter(|| {
-        best_match("jelly", "jellyfish");
+        bump.reset();
+        best_match(&bump, "jelly", "jellyfish");
     })
 }
 
-#[bench]
 fn url(b: &mut Bencher) {
-    b.iter(|| best_match(
-        "services",
-        "https://some-domain.io/api/tenant/1/group/some-group/setup/c4b158c3-047f-48d8-8f7a-8ac20d20460b/lists/services/?before=2020-01-01"
-    ));
+    let mut bump = Bump::new();
+    b.iter(|| {
+        bump.reset();
+        black_box(best_match(&bump, "services", include_str!("services.txt")));
+    });
 }
 
-#[bench]
 fn url_format(b: &mut Bencher) {
+    let mut bump = Bump::new();
     b.iter(|| {
-        let t = "https://some-domain.io/api/tenant/1/group/some-group/setup/c4b158c3-047f-48d8-8f7a-8ac20d20460b/lists/services/?before=2020-01-01";
+        bump.reset();
+        let t = include_str!("services.txt");
 
-        format_simple(&best_match("services", t).unwrap(), t, "<before>", "</after>");
+        format_simple(
+            &best_match(&bump, "services", t).unwrap(),
+            t,
+            "<before>",
+            "</after>",
+        );
     })
 }
 
-#[bench]
 fn medium_start(b: &mut Bencher) {
-    b.iter(|| best_match(
-        "tracking",
-        "This is a tracking issue for the #[bench] attribute and its stability in the compiler. Currently it is not possible to use this from stable Rust as it requires extern crate test which is itself not stable."
-    ));
+    let mut bump = Bump::new();
+    b.iter(|| {
+        bump.reset();
+        black_box(best_match(&bump, "tracking", include_str!("tracking.txt")));
+    });
 }
 
-#[bench]
 fn medium_middle(b: &mut Bencher) {
-    b.iter(|| best_match(
-        "requires",
-        "This is a tracking issue for the #[bench] attribute and its stability in the compiler. Currently it is not possible to use this from stable Rust as it requires extern crate test which is itself not stable."
-    ));
+    let mut bump = Bump::new();
+    b.iter(|| {
+        bump.reset();
+        black_box(best_match(&bump, "requires", include_str!("tracking.txt")));
+    });
 }
 
-#[bench]
 fn medium_end(b: &mut Bencher) {
-    b.iter(|| best_match(
-        "itself",
-        "This is a tracking issue for the #[bench] attribute and its stability in the compiler. Currently it is not possible to use this from stable Rust as it requires extern crate test which is itself not stable."
-    ));
+    let mut bump = Bump::new();
+    b.iter(|| {
+        bump.reset();
+        black_box(best_match(&bump, "itself", include_str!("tracking.txt")));
+    });
 }
 
-#[bench]
 fn long_start_close(b: &mut Bencher) {
+    let mut bump = Bump::new();
     b.iter(|| {
-        best_match(
+        bump.reset();
+        black_box(best_match(
+            &bump,
             "empty baseline",
-            r"The empty benchmark is there as a baseline. An anecdote: In my first
-          compilation of the benchmark, I forgot to add -O to the rustc command
-          line, and wound up with a few ns/iter on an empty benchmark. Thus, I
-          now always have an empty benchmark in my list, to make sure I benchmark
-          an optimized version.",
-        )
+            include_str!("empty-baseline.txt"),
+        ));
     });
 }
 
-#[bench]
 fn long_middle_close(b: &mut Bencher) {
+    let mut bump = Bump::new();
     b.iter(|| {
-        best_match(
+        bump.reset();
+        black_box(best_match(
+            &bump,
             "rustc wound",
-            r"The empty benchmark is there as a baseline. An anecdote: In my first
-          compilation of the benchmark, I forgot to add -O to the rustc command
-          line, and wound up with a few ns/iter on an empty benchmark. Thus, I
-          now always have an empty benchmark in my list, to make sure I benchmark
-          an optimized version.",
-        )
+            include_str!("empty-baseline.txt"),
+        ));
     });
 }
+
+criterion_group!(benches, bench_group);
+criterion_main!(benches);
