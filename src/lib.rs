@@ -77,40 +77,10 @@ mod parsing;
 mod scoring;
 mod search;
 
-use bumpalo::Bump;
 pub use matching::{ContinuousMatch, ContinuousMatches, Match};
+pub use parsing::Query;
 pub use scoring::Scoring;
-pub use search::FuzzySearch;
-
-/// Returns the best match for `query` in the target string `string`.
-///
-/// Always tries to match the _full_ pattern. A partial match is considered
-/// invalid and will return [`None`]. Will also return [`None`] in case `query` or
-/// `string` are empty.
-///
-/// Note that whitespace in query will be _ignored_.
-///
-/// # Examples
-///
-/// Basic usage:
-///
-/// ```rust
-/// use sublime_fuzzy::{best_match, Scoring};
-///
-/// let m = best_match("scc", "SoccerCartoonController")
-///     .expect("No match");
-///
-/// assert_eq!(m.matched_indices().len(), 3);
-/// assert_eq!(m.score(), 172);
-/// ```
-///
-pub fn best_match<'bump>(
-    bump: &'bump Bump,
-    query: &str,
-    target: &str,
-) -> Option<&'bump Match<'bump>> {
-    FuzzySearch::new(query, target).best_match(bump)
-}
+pub use search::best_match;
 
 /// Formats a [`Match`] by appending `before` before any matches and `after`
 /// after any matches.
@@ -177,7 +147,20 @@ pub fn format_simple(match_: &Match, target: &str, before: &str, after: &str) ->
 mod tests {
     use bumpalo::Bump;
 
-    use crate::{best_match, format_simple, matching::ContinuousMatch};
+    use crate::{Match, Scoring, format_simple, matching::ContinuousMatch, parsing::Query};
+
+    fn best_match<'bump>(
+        bump: &'bump Bump,
+        query: &str,
+        haystack: &str,
+    ) -> Option<&'bump Match<'bump>> {
+        super::best_match(
+            bump,
+            &Query::new(bump, query),
+            &Scoring::default(),
+            haystack,
+        )
+    }
 
     #[test]
     fn feature_serde() {

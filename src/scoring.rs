@@ -4,7 +4,7 @@ pub static DEFAULT_SCORING: Scoring = Scoring {
 };
 
 /// Bonuses/penalties used for scoring a [`Match`](crate::matching::Match).
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Scoring {
     /// `current_consecutive_count * bonus_consecutive` will be added for every

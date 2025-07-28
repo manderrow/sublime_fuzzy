@@ -2,7 +2,7 @@
 //!
 //! Pass the query as first and target string as second parameters to `sfz`.
 use bumpalo::Bump;
-use sublime_fuzzy::{best_match, format_simple};
+use sublime_fuzzy::{Query, Scoring, best_match, format_simple};
 
 fn main() {
     let mut args = std::env::args();
@@ -12,7 +12,7 @@ fn main() {
     let s = args.next().expect("Missing target arg");
 
     let bump = Bump::new();
-    if let Some(m) = best_match(&bump, &q, &s) {
+    if let Some(m) = best_match(&bump, &Query::new(&bump, &q), &Scoring::default(), &s) {
         println!("{}", format_simple(&m, &s, "<", ">"));
     } else {
         println!("No match");
